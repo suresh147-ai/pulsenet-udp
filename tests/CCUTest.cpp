@@ -3,6 +3,7 @@
 #include <unordered_map>
 #include <chrono>
 #include <thread>
+#include <atomic>
 
 int handleServer() {
     pulse::net::UDPAddr serverAddr("127.0.0.1", 9000);
@@ -17,7 +18,7 @@ int handleServer() {
                 auto [data, from] = *maybe;
                 std::string clientKey = from.ip + ":" + std::to_string(from.port);
                 clientDatagramCount[clientKey]++;
-    
+
                 // Echo the datagram back to the client
                 if (!server->sendTo(from, data)) {
                     // This is a pretty fatal error since we're on loopback.
@@ -32,7 +33,7 @@ int handleServer() {
     return 0;
 }
 
-void sendDatagrams(const std::string& serverIp, uint16_t serverPort, std::atomic<uint64_t>* datagramCount, std::atomic<uint64_t>* datagramTimeoutCount, std::atomic_bool* stopFlag) {
+void sendDatagrams(const std::string& serverIp, uint16_t serverPort, std::atomic<uint64_t>* datagramCount, std::atomic<uint64_t>* datagramTimeoutCount, std::atomic<bool>* stopFlag) {
     pulse::net::UDPAddr serverAddr(serverIp, serverPort);
     try {
         auto client = pulse::net::DialUDP(serverAddr);
@@ -42,19 +43,19 @@ void sendDatagrams(const std::string& serverIp, uint16_t serverPort, std::atomic
         auto maxWaitTime = std::chrono::milliseconds(1000 / 48); // 24 Hz is the server tick rate
 
         std::vector<uint8_t> message = {'h', 'e', 'l', 'l', 'o'};
-        while (*stopFlag == false) {
+        while (!stopFlag->load()) {
             if (waitingForResponse && std::chrono::steady_clock::now() < timeSinceLastSend + maxWaitTime) {
                 // Wait for a response from the server
                 if (auto maybe = client->recvFrom()) {
                     auto [data, from] = *maybe;
                     waitingForResponse = false;
-                    (*datagramCount)++; // Increment the datagram count only when a response is received
+                    datagramCount->fetch_add(1); // Increment the datagram count only when a response is received
                 }
             }
             else if (waitingForResponse) {
                 // Timeout waiting for a response, send again
                 waitingForResponse = false;
-                (*datagramTimeoutCount)++;
+                datagramTimeoutCount->fetch_add(1);
             }
             else {
                 // Sleep until the next tick
@@ -78,7 +79,7 @@ int handleClient(int concurrentClients = 10) {
     const int numClients = concurrentClients;
     std::atomic<uint64_t> datagramsSent(0);
     std::atomic<uint64_t> datagramsTimedOut(0);
-    std::atomic_bool stopFlag(false);
+    std::atomic<bool> stopFlag(false);
 
     std::vector<std::thread> clientThreads;
 
@@ -90,7 +91,7 @@ int handleClient(int concurrentClients = 10) {
 
     // Wait until the stop signal is reached
     std::this_thread::sleep_until(stopSignal);
-    stopFlag = true;
+    stopFlag.store(true);
 
     std::cout << "Stopping clients..." << std::endl;
     for (auto& thread : clientThreads) {
