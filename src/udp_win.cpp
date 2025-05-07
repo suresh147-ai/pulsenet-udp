@@ -1,5 +1,6 @@
 #include "pulseudp/udp.h"
 #include <winsock2.h>
+#include <mswsock.h>
 #include <ws2tcpip.h>
 #include <stdexcept>
 #include <string>
@@ -40,7 +41,21 @@ namespace pulse::net {
 
 class UDPSocketWindows : public UDPSocket {
 public:
-    UDPSocketWindows(SOCKET sock) : sock_(sock) {}
+    UDPSocketWindows(SOCKET sock) : sock_(sock) {
+        // Increase socket buffer sizes but don't start receiving thread
+        int sendBufSize = 4 * 1024 * 1024; // 4MB
+        setsockopt(sock, SOL_SOCKET, SO_SNDBUF, (char*)&sendBufSize, sizeof(sendBufSize));
+        
+        // We still need a reasonable receive buffer for any responses
+        int recvBufSize = 1 * 1024 * 1024; // 1MB is enough for client
+        setsockopt(sock, SOL_SOCKET, SO_RCVBUF, (char*)&recvBufSize, sizeof(recvBufSize));
+        
+        // Disable connection reset behavior
+        BOOL bNewBehavior = FALSE;
+        DWORD dwBytesReturned = 0;
+        WSAIoctl(sock, SIO_UDP_CONNRESET, &bNewBehavior, sizeof(bNewBehavior), 
+                NULL, 0, &dwBytesReturned, NULL, NULL);
+    }
 
     ~UDPSocketWindows() override {
         close();
