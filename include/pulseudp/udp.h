@@ -14,14 +14,14 @@ public:
     virtual ~UDPSocket() = default;
 
     // Send a packet to the given address
-    virtual bool sendTo(const UDPAddr& addr, const std::vector<uint8_t>& data) = 0;
+    virtual bool sendTo(const UDPAddr& addr, const uint8_t* data, size_t length) = 0;
 
     // Send a packet to the connected address
-    virtual bool send(const std::vector<uint8_t>& data) = 0;
+    virtual bool send(const uint8_t* data, size_t length) = 0;
 
     // Read a packet into the buffer and return the source address and number of bytes read
     // Returns false on non-blocking no-data or error
-    virtual std::optional<std::pair<std::vector<uint8_t>, UDPAddr>> recvFrom() = 0;
+    virtual std::optional<std::tuple<const uint8_t*, size_t, UDPAddr>> recvFrom() = 0;
 
     // Returns underlying socket fd/handle if needed
     virtual int getHandle() const = 0;

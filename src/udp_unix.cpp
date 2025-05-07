@@ -10,6 +10,8 @@
 
 namespace pulse::net {
 
+constexpr size_t PACKET_BUFFER_SIZE = 2048;
+
 class UDPSocketUnix : public UDPSocket {
 public:
     UDPSocketUnix(int sockfd) : sockfd_(sockfd) {}
@@ -17,38 +19,38 @@ public:
         close();
     }
 
-    bool sendTo(const UDPAddr& addr, const std::vector<uint8_t>& data) override {
+    bool sendTo(const UDPAddr& addr, const uint8_t* data, size_t length) override {
         ssize_t sent = sendto(
             sockfd_,
-            data.data(),
-            data.size(),
+            data,
+            length,
             0,
             reinterpret_cast<const sockaddr*>(addr.sockaddrData()),
             static_cast<socklen_t>(addr.sockaddrLen())
         );
-        return sent == static_cast<ssize_t>(data.size());
+        return sent == static_cast<ssize_t>(length);
     }
 
-    bool send(const std::vector<uint8_t>& data) override {
-        ssize_t sent = ::send(sockfd_, data.data(), data.size(), 0);
+    bool send(const uint8_t* data, size_t length) override {
+        ssize_t sent = ::send(sockfd_, data, length, 0);
         if (sent < 0) {
             if (errno == EWOULDBLOCK || errno == EAGAIN) {
                 return false;
             }
             throw std::runtime_error("send failed: " + std::string(strerror(errno)));
         }
-        return sent == static_cast<ssize_t>(data.size());
+        return sent == static_cast<ssize_t>(length);
     }
 
-    std::optional<std::pair<std::vector<uint8_t>, UDPAddr>> recvFrom() override {
-        char buf[2048];
+    std::optional<std::tuple<const uint8_t*, size_t, UDPAddr>> recvFrom() override {
+        static thread_local char buf[PACKET_BUFFER_SIZE];
         sockaddr_storage src{};
         socklen_t srclen = sizeof(src);
     
         ssize_t received = ::recvfrom(
             sockfd_,
             buf,
-            sizeof(buf),
+            PACKET_BUFFER_SIZE,
             0,
             reinterpret_cast<sockaddr*>(&src),
             &srclen
@@ -61,10 +63,9 @@ public:
             throw std::runtime_error("recvfrom failed: " + std::string(strerror(errno)));
         }
     
-        std::vector<uint8_t> data(buf, buf + received);
         UDPAddr addr = decodeAddr(reinterpret_cast<sockaddr*>(&src));
-        return std::make_pair(std::move(data), std::move(addr));
-    }
+        return std::make_tuple(reinterpret_cast<const uint8_t*>(buf), static_cast<size_t>(received), addr);
+    }    
 
     int getHandle() const override {
         return sockfd_;

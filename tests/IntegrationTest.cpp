@@ -21,25 +21,26 @@ int main () {
 
     std::string message = "Hello, UDP!";
     std::vector<uint8_t> data(message.begin(), message.end());
-    if (!clientSocket->send(data)) {
+    if (!clientSocket->send(data.data(), data.size())) {
         std::cerr << "Failed to send data." << std::endl;
         return 1;
     }
     std::cout << "Data sent successfully." << std::endl;
 
-    auto received = serverSocket->recvFrom();
-    if (!received) {
+    if (auto maybe = serverSocket->recvFrom()) {
+        auto [data, length, addr] = *maybe;
+        std::string receivedMessage(reinterpret_cast<const char*>(data), length);
+        std::cout << "Received message: " << receivedMessage << " from " << addr.ip << ":" << addr.port << std::endl;
+        if (receivedMessage != message) {
+            std::cerr << "Received message does not match sent message." << std::endl;
+            return 1;
+        }
+        std::cout << "Received message matches sent message." << std::endl;
+    }
+    else {
         std::cerr << "Failed to receive data." << std::endl;
         return 1;
     }
-    auto [recvData, addr] = *received;
-    std::string recvMessage(recvData.begin(), recvData.end());
-    std::cout << "Received message: " << recvMessage << " from " << addr.ip << ":" << addr.port << std::endl;
-    if (recvMessage != message) {
-        std::cerr << "Received message does not match sent message." << std::endl;
-        return 1;
-    }
-    std::cout << "Received message matches sent message." << std::endl;
     std::cout << "Test completed successfully." << std::endl;
     return 0;
 }

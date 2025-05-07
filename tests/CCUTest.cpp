@@ -15,12 +15,12 @@ int handleServer() {
     while (true) {
         try {
             if (auto maybe = server->recvFrom()) {
-                auto [data, from] = *maybe;
-                std::string clientKey = from.ip + ":" + std::to_string(from.port);
+                auto [data, length, addr] = *maybe;
+                std::string clientKey = addr.ip + ":" + std::to_string(addr.port);
                 clientDatagramCount[clientKey]++;
 
                 // Echo the datagram back to the client
-                if (!server->sendTo(from, data)) {
+                if (!server->sendTo(addr, data, length)) {
                     // This is a pretty fatal error since we're on loopback.
                     std::cerr << "Failed to send datagram back to client" << std::endl;
                 }
@@ -47,7 +47,7 @@ void sendDatagrams(const std::string& serverIp, uint16_t serverPort, std::atomic
             if (waitingForResponse && std::chrono::steady_clock::now() < timeSinceLastSend + maxWaitTime) {
                 // Wait for a response from the server
                 if (auto maybe = client->recvFrom()) {
-                    auto [data, from] = *maybe;
+                    auto [data, length, from] = *maybe;
                     waitingForResponse = false;
                     datagramCount->fetch_add(1); // Increment the datagram count only when a response is received
                 }
@@ -63,7 +63,7 @@ void sendDatagrams(const std::string& serverIp, uint16_t serverPort, std::atomic
                 timeSinceLastSend = std::chrono::steady_clock::now();
 
                 // Send a datagram to the server
-                if (client->send(message)) {
+                if (client->send(message.data(), message.size())) {
                     waitingForResponse = true;
                 } else {
                     std::cerr << "Failed to send datagram" << std::endl;
