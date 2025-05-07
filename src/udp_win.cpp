@@ -5,10 +5,36 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <atomic>
+#include <mutex>
 
 #pragma comment(lib, "ws2_32.lib")
 
 namespace pulse::net {
+
+    static std::atomic<int> wsaRefCount{0};
+    static std::mutex wsaMutex;
+
+    static void initWSA() {
+        std::lock_guard<std::mutex> lock(wsaMutex);
+        if (wsaRefCount == 0) {
+            WSADATA wsaData;
+            if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+                throw std::runtime_error("WSAStartup failed");
+            }
+        }
+        wsaRefCount++;
+    }
+
+    static void cleanupWSA() {
+        std::lock_guard<std::mutex> lock(wsaMutex);
+        if (wsaRefCount > 0) {
+            wsaRefCount--;
+            if (wsaRefCount == 0) {
+                WSACleanup();
+            }
+        }
+    }
 
 class UDPSocketWindows : public UDPSocket {
 public:
@@ -16,6 +42,7 @@ public:
 
     ~UDPSocketWindows() override {
         close();
+        cleanupWSA();
     }
 
     bool sendTo(const UDPAddr& addr, const std::vector<uint8_t>& data) override {
@@ -104,14 +131,7 @@ private:
 };
 
 std::unique_ptr<UDPSocket> ListenUDP(const UDPAddr& bindAddr) {
-    static bool wsaInitialized = false;
-    if (!wsaInitialized) {
-        WSADATA wsa;
-        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) {
-            throw std::runtime_error("WSAStartup failed");
-        }
-        wsaInitialized = true;
-    }
+    initWSA();
 
     int family = AF_INET;
     const void* addrPtr = nullptr;
@@ -153,6 +173,8 @@ std::unique_ptr<UDPSocket> ListenUDP(const UDPAddr& bindAddr) {
 }
 
 std::unique_ptr<UDPSocket> DialUDP(const UDPAddr& remoteAddr) {
+    initWSA();
+
     int family = AF_INET;
     sockaddr_storage remoteSock{};
     int remoteLen = 0;

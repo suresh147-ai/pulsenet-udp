@@ -32,6 +32,13 @@ target_include_directories(pulseudp_test PRIVATE include)
 target_link_libraries(pulseudp_test PRIVATE pulseudp)
 add_dependencies(pulseudp_test pulseudp)
 
+add_executable(pulseudp_ccu_test
+    tests/CCUTest.cpp
+)
+target_include_directories(pulseudp_ccu_test PRIVATE include)
+target_link_libraries(pulseudp_ccu_test PRIVATE pulseudp)
+add_dependencies(pulseudp_ccu_test pulseudp)
+
 # Install target
 install(TARGETS pulseudp
         LIBRARY DESTINATION lib
@@ -41,6 +48,11 @@ install(DIRECTORY include/ DESTINATION include)
 
 # Install test target
 install(TARGETS pulseudp_test
+        RUNTIME DESTINATION bin
+        LIBRARY DESTINATION lib
+        ARCHIVE DESTINATION lib)
+        
+install(TARGETS pulseudp_ccu_test
         RUNTIME DESTINATION bin
         LIBRARY DESTINATION lib
         ARCHIVE DESTINATION lib)
