@@ -83,6 +83,7 @@ int handleClient(int concurrentClients = 10) {
 
     std::vector<std::thread> clientThreads;
 
+    auto startTime = std::chrono::steady_clock::now();
     auto stopSignal = std::chrono::steady_clock::now() + std::chrono::seconds(10);
     std::cout << "Sending datagrams for 10 seconds on " << numClients << " clients..." << std::endl;
     for (int i = 0; i < numClients; ++i) {
@@ -100,13 +101,19 @@ int handleClient(int concurrentClients = 10) {
         }
     }
 
+    std::cout << "All clients stopped." << std::endl;
+    auto endTime = std::chrono::steady_clock::now();
+
+    auto elapsedTime = std::chrono::duration_cast<std::chrono::seconds>(endTime - startTime).count();
+    std::cout << "Elapsed time: " << elapsedTime << " seconds" << std::endl;
+
     std::cout << "Total datagrams sent: " << datagramsSent.load() << std::endl;
-    std::cout << "Average datagrams per second: " << (datagramsSent.load() / 10) << std::endl;
-    std::cout << "Average datagrams per client per second: " << ((datagramsSent.load() / numClients) / 10) << std::endl;
+    std::cout << "Average datagrams per second: " << (datagramsSent.load() / elapsedTime) << std::endl;
+    std::cout << "Average datagrams per client per second: " << ((datagramsSent.load() / numClients) / elapsedTime) << std::endl;
     std::cout << "Tick Rate: 24 Hz" << std::endl;
 
     std::cout << "Total datagrams timed out: " << datagramsTimedOut.load() << std::endl;
-    std::cout << "Average datagrams timed out per second: " << (datagramsTimedOut.load() / 10) << std::endl;
+    std::cout << "Average datagrams timed out per second: " << (datagramsTimedOut.load() / elapsedTime) << std::endl;
     std::cout << "Average datagrams timed out per client: " << (datagramsTimedOut.load() / numClients) << std::endl;
 
     return 0;
