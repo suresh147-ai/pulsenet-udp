@@ -2,7 +2,7 @@
 
 ## 📜 Table of Contents
 
-*   [📰 Foreward](#-philosophy)
+*   [📰 Foreward](#-foreward)
 *   [🔥 Philosophy](#-philosophy)
 *   [🔧 Language Rules (L)](#-language-rules)
     *   [L.1: C++23 Standard](#l1-c23-standard)
@@ -11,7 +11,7 @@
     *   [L.4: Ownership and Error Propagation](#l4-ownership-and-error-propagation)
     *   [L.5: RTTI Off](#l5-rtti-off)
     *   [L.6: Header-Only Libraries Restricted](#l6-header-only-libraries-restricted)
-*   [🏗️ Architectural Principles (A)] (#️-architectural-principles)
+*   [🏗️ Architectural Principles (A)](#️-architectural-principles)
     *   [A.1: Module Layers & Boundaries](#a1-module-layers--boundaries)
     *   [A.2: Interface Design](#a2-interface-design)
     *   [A.3: Implementation Details](#a3-implementation-details)
