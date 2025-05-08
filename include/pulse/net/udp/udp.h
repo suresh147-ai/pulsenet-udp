@@ -7,12 +7,7 @@
 #include <cstdint>
 #include <optional>
 #include <utility>
-
-#if __cpp_lib_expected >= 202211L
-    #include <expected>
-#else
-    #error "std::expected is not available. Upgrade your compiler."
-#endif
+#include <expected>
 
 namespace pulse::net::udp {
 

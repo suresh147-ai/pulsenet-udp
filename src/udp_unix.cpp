@@ -22,7 +22,6 @@ public:
     inline std::unexpected<ErrorCode> mapSendErrno(int err) {
         switch (err) {
             case EWOULDBLOCK:
-            case EAGAIN:
                 return std::unexpected(ErrorCode::WouldBlock);
             case EBADF:
             case ENOTSOCK:
@@ -86,7 +85,6 @@ public:
         if (received < 0) {
             switch (errno) {
                 case EWOULDBLOCK:
-                case EAGAIN:
                     return std::unexpected(ErrorCode::WouldBlock);
     
                 case EBADF:

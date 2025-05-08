@@ -1,11 +1,13 @@
 <div align="center">
   <img src="https://pulsenet.dev/images/pulse-networking-social.png" alt="Pulse Networking" width="1200">
-  <h1>pulseudp</h1>
-  <p><strong>Raw non-blocking UDP sockets with Go-style ergonomics.</strong></p>
+  <h1>pulse::net::udp</h1>
+  <p><strong>Raw non-blocking UDP sockets with Go-style ergonomics, in modern C++23.</strong></p>
   <p>
     <a href="#features">Features</a> •
     <a href="#why">Why?</a> •
     <a href="#usage">Usage</a> •
+    <a href="#build-requirements">Build Requirements</a> •
+    <a href="#fetchcontent">FetchContent</a> •
     <a href="#platform-support">Platform Support</a> •
     <a href="#license">License</a>
   </p>
@@ -13,78 +15,135 @@
 
 ---
 
-pulseudp is a cross-platform UDP socket wrapper for C++ that gives you a clean, Go-style interface — no blocking nonsense, no bloated event loops, and no libuv circus.
+`pulse::net::udp` is a minimal, modern, cross-platform UDP socket layer written in pure C++23 — with sane error handling (`std::expected`), zero dependencies, and no framework bloat.
 
-Use it as the foundation for anything low-latency and real-time: games, protocols, transport layers, etc.
+It does one thing well: **non-blocking UDP** across Unix and Windows.
 
-It’s designed to get out of your way and let the OS do its job.
+## 🚀 Features
 
-## Features
- - ✅ Non-blocking UDP I/O (just like Go)
- - ✅ Listen() for servers
- - ✅ Dial() for clients
- - ✅ sendTo() and recvFrom() like you’d expect
- - ✅ Optional send() and recv() with connected semantics
- - ✅ IPv4 + IPv6 support
- - ✅ No third-party dependencies
- - ✅ Portable between Unix and Windows
- - ✅ Easy to test, drop-in for higher-level protocols
+- ✅ Modern C++23 (`std::expected`, no exceptions)
+- ✅ Non-blocking UDP sockets
+- ✅ `Listen()` and `Dial()` like Go
+- ✅ `send()` / `sendTo()` and `recvFrom()` with structured error handling
+- ✅ Zero dependencies
+- ✅ Cross-platform: Unix (Linux/macOS) and Windows (Winsock2)
+- ✅ Dead simple integration
 
-## Why?
+## 🧠 Why?
 
-Because C++ UDP sockets are a mess:
- - On Unix, you’re writing raw socket()/bind()/recvfrom() boilerplate.
- - On Windows, you’re dancing with Winsock and WSAStartup() just to send a packet.
- - Nobody agrees on non-blocking behavior or even a clean API.
+Because writing portable UDP in C++ is still a flaming trash heap:
+- POSIX and Winsock APIs barely resemble each other
+- Most libraries are bloated, legacy-bound, or layered abstractions on top of boost or libuv
+- Nobody should still be writing socket() / bind() / recvfrom() directly in 2025
 
-Go got it right. So we copied it.
+This library fixes that with a clean, modern API that doesn’t try to reinvent networking — just makes it suck less.
 
-This isn’t an abstraction layer built on top of a ten-ton framework. It’s just clean, minimal UDP done right.
-
-## Usage
+## 🧑‍💻 Usage
 
 ```cpp
 #include <pulse/net/udp/udp.h>
 #include <iostream>
+#include <vector>
 
 int main() {
-    pulse::net::udp::Addr serverAddr("127.0.0.1", 9000);
-    auto server = pulse::net::udp::Listen(serverAddr);
-    auto client = pulse::net::udp::Dial(serverAddr);
+    using namespace pulse::net::udp;
 
-    std::vector<uint8_t> msg = {'h', 'e', 'l', 'l', 'o'};
-    client->send(msg);
+    Addr serverAddr("127.0.0.1", 9000);
 
-    std::optional<pulse::net::udp::Addr> from;
-    std::vector<uint8_t> data;
+    auto serverResult = Listen(serverAddr);
+    if (!serverResult) {
+        std::cerr << "Listen failed: " << static_cast<int>(serverResult.error()) << "\n";
+        return 1;
+    }
+    auto& server = *serverResult;
 
-    if (auto maybe = server->recvFrom()) {
-        std::tie(data, from) = *maybe;
-        std::cout << "Got packet from " << from->ip << ":" << from->port << std::endl;
+    auto clientResult = Dial(serverAddr);
+    if (!clientResult) {
+        std::cerr << "Dial failed: " << static_cast<int>(clientResult.error()) << "\n";
+        return 1;
+    }
+    auto& client = *clientResult;
+
+    std::vector<uint8_t> message = {'h', 'e', 'l', 'l', 'o'};
+    if (auto res = client->send(message.data(), message.size()); !res) {
+        std::cerr << "Send failed: " << static_cast<int>(res.error()) << "\n";
+        return 1;
     }
 
+    auto recvResult = server->recvFrom();
+    if (!recvResult) {
+        std::cerr << "Receive failed: " << static_cast<int>(recvResult.error()) << "\n";
+        return 1;
+    }
+
+    const ReceivedPacket& packet = *recvResult;
+    std::string msg(reinterpret_cast<const char*>(packet.data), packet.length);
+
+    std::cout << "Received: " << msg << " from " << packet.addr.ip << ":" << packet.addr.port << "\n";
     return 0;
 }
 ```
 
-## Platform Support
+## 🏗 Build Requirements
 
- | Platform | Supported? | Impl Notes | 
- | ---      | ---        | ---        |
- | macOS    | ✅         | fcntl() non-blocking sockets |
- | Linux    | ✅         | Same as above |
- | Windows  | ✅         | Raw Winsock2 w/ WSAStartup() |
+* **C++23**
+* **CMake ≥ 3.15**
 
-You don’t need libuv, boost, or some “cross-platform networking abstraction” from hell. It’s all native. It’s all simple.
+If your compiler doesn’t support `std::expected`, upgrade. This is not a museum.
 
-## License
+### ⚠️ Error Handling Philosophy
 
-AGPLv3. If you’re using this in a closed-source project, you need to license your project AGPLv3 as well or purchase a commercial license.
+`pulse::net::udp` uses `std::expected` for all runtime operations. No exceptions are thrown during normal usage.
 
-## Final Word
+The **only exceptions** are constructors like `Addr(ip, port)`, where C++ gives no sane way to return an error. If construction fails due to invalid input (e.g. garbage IP address), you'll get a `std::invalid_argument`.
 
-pulseudp is not a toy. It’s not trying to hold your hand. It gives you raw UDP, cleanly wrapped, so you can go build real-time systems without dragging 200 build dependencies behind you.
+Everything else—`send()`, `recvFrom()`, `Dial()`, `Listen()`—uses `std::expected<T, ErrorCode>` so you can handle failures explicitly, without try/catch nonsense.
 
-If you want a networking library with 300 contributors and an official Discord server, you’re in the wrong place.
+## 📦 FetchContent
 
-If you want simple, fast, understandable UDP for serious use — welcome.
+You can pull in `pulse::net::udp` via `FetchContent` like this:
+
+```cmake
+include(FetchContent)
+
+FetchContent_Declare(
+  pulse_udp
+  GIT_REPOSITORY https://git.pulsenet.dev/pulse/udp
+  GIT_TAG        v1.0.0
+)
+
+FetchContent_MakeAvailable(pulse_udp)
+
+set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+target_link_libraries(your_target PRIVATE pulse::net::udp)
+```
+
+The actual target is aliased to `pulse::net::udp`, even though the library name is `pulsenet_udp`.
+
+## 🪟 Platform Support
+
+| Platform | Supported? | Notes                         |
+| -------- | ---------- | ----------------------------- |
+| Linux    | ✅          | `fcntl()` for non-blocking    |
+| macOS    | ✅          | Same as above                 |
+| Windows  | ✅          | Raw Winsock2 + `WSAStartup()` |
+
+## ⚖️ License
+
+**AGPLv3**. If that offends you, congratulations — it’s working as intended.
+
+Want to use this in a proprietary product? [Buy a commercial license](https://pulsenet.dev/) or go write your own UDP stack.
+
+## 🧨 Final Word
+
+This isn’t boost. This isn’t some academic networking playground.
+
+If you want a fast, lean UDP layer that doesn’t try to abstract away the world — and doesn’t get in your way when you're building serious low-latency systems — you're in the right place.
+
+If you need a coroutine DSL, TLS tunnels, and a metrics dashboard, leave now.
+
+## Version
+
+**pulse::net::udp v1.0.0**
