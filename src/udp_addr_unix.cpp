@@ -6,6 +6,9 @@
 
 namespace pulse::net::udp {
 
+const char* Addr::AnyIPv4 = "0.0.0.0";
+const char* Addr::AnyIPv6 = "::";
+
 Addr::Addr(const std::string& ipStr, uint16_t port)
     : ip(ipStr), port(port)
 {

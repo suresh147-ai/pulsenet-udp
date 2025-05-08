@@ -17,6 +17,10 @@ public:
     const void* sockaddrData() const;
     size_t sockaddrLen() const;
 
+    // Let's create a constant AnyIPv4 and AnyIPv6 address const char * for convenience
+    static const char * AnyIPv4;
+    static const char * AnyIPv6;
+
 private:
     alignas(16) char storage_[128]{}; // big enough for sockaddr_in6
 };
