@@ -36,7 +36,7 @@ add_library(pulseudp STATIC
 )
 
 # Create namespaced alias
-add_library(pulseudp::pulseudp ALIAS pulseudp)
+add_library(pulse::net::udp ALIAS pulseudp)
 
 # Public include directory
 target_include_directories(pulseudp PUBLIC
