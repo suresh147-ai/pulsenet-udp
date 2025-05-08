@@ -13,11 +13,7 @@ If that offends your open source purity, tough.
 
 ## 🛠 Code Style
 
-We don’t use linters to feel superior. We use them to avoid wasting time.
- - Use go fmt.
- - Keep functions short. If it takes more than one screen to understand it, rewrite it.
- - Don’t get clever. Get readable.
- - Prefer tested and proven solutions over trendy nonsense.
+Read the [C++ Onboarding Manual](CPP-MANUAL.md). Seriously, it's a requirement.
 
 ## 🧪 Testing
  - All new features must come with tests.
