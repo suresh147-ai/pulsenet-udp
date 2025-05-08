@@ -21,8 +21,8 @@ It’s designed to get out of your way and let the OS do its job.
 
 ## Features
  - ✅ Non-blocking UDP I/O (just like Go)
- - ✅ ListenUDP() for servers
- - ✅ DialUDP() for clients
+ - ✅ Listen() for servers
+ - ✅ Dial() for clients
  - ✅ sendTo() and recvFrom() like you’d expect
  - ✅ Optional send() and recv() with connected semantics
  - ✅ IPv4 + IPv6 support
@@ -44,18 +44,18 @@ This isn’t an abstraction layer built on top of a ten-ton framework. It’s ju
 ## Usage
 
 ```cpp
-#include <pulseudp/udp.h>
+#include <pulse/net/udp/udp.h>
 #include <iostream>
 
 int main() {
-    pulse::net::UDPAddr serverAddr("127.0.0.1", 9000);
-    auto server = pulse::net::ListenUDP(serverAddr);
-    auto client = pulse::net::DialUDP(serverAddr);
+    pulse::net::udp::Addr serverAddr("127.0.0.1", 9000);
+    auto server = pulse::net::udp::Listen(serverAddr);
+    auto client = pulse::net::udp::Dial(serverAddr);
 
     std::vector<uint8_t> msg = {'h', 'e', 'l', 'l', 'o'};
     client->send(msg);
 
-    std::optional<pulse::net::UDPAddr> from;
+    std::optional<pulse::net::udp::Addr> from;
     std::vector<uint8_t> data;
 
     if (auto maybe = server->recvFrom()) {

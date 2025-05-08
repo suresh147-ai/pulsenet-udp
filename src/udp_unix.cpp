@@ -1,4 +1,4 @@
-#include "pulseudp/udp.h"
+#include "pulse/net/udp/udp.h"
 #include <unistd.h>
 #include <fcntl.h>
 #include <cstring>
@@ -8,18 +8,33 @@
 #include <netinet/in.h>
 #include <errno.h>
 
-namespace pulse::net {
+namespace pulse::net::udp {
 
 constexpr size_t PACKET_BUFFER_SIZE = 2048;
 
-class UDPSocketUnix : public UDPSocket {
+class SocketUnix : public Socket {
 public:
-    UDPSocketUnix(int sockfd) : sockfd_(sockfd) {}
-    ~UDPSocketUnix() override {
+    SocketUnix(int sockfd) : sockfd_(sockfd) {}
+    ~SocketUnix() override {
         close();
     }
 
-    bool sendTo(const UDPAddr& addr, const uint8_t* data, size_t length) override {
+    inline std::unexpected<ErrorCode> mapSendErrno(int err) {
+        switch (err) {
+            case EWOULDBLOCK:
+            case EAGAIN:
+                return std::unexpected(ErrorCode::WouldBlock);
+            case EBADF:
+            case ENOTSOCK:
+                return std::unexpected(ErrorCode::InvalidSocket);
+            case ECONNRESET:
+                return std::unexpected(ErrorCode::ConnectionReset);
+            default:
+                return std::unexpected(ErrorCode::SendFailed);
+        }
+    }
+
+    std::expected<void, ErrorCode> sendTo(const Addr& addr, const uint8_t* data, size_t length) override {
         ssize_t sent = sendto(
             sockfd_,
             data,
@@ -28,48 +43,88 @@ public:
             reinterpret_cast<const sockaddr*>(addr.sockaddrData()),
             static_cast<socklen_t>(addr.sockaddrLen())
         );
-        return sent == static_cast<ssize_t>(length);
-    }
 
-    bool send(const uint8_t* data, size_t length) override {
-        ssize_t sent = ::send(sockfd_, data, length, 0);
         if (sent < 0) {
-            if (errno == EWOULDBLOCK || errno == EAGAIN) {
-                return false;
-            }
-            throw std::runtime_error("send failed: " + std::string(strerror(errno)));
+            return mapSendErrno(errno);
         }
-        return sent == static_cast<ssize_t>(length);
+    
+        if (sent != static_cast<ssize_t>(length)) {
+            return std::unexpected(ErrorCode::PartialSend);
+        }
+    
+        return {}; // success
     }
 
-    std::optional<std::tuple<const uint8_t*, size_t, UDPAddr>> recvFrom() override {
-        static thread_local char buf[PACKET_BUFFER_SIZE];
+    std::expected<void, ErrorCode> send(const uint8_t* data, size_t length) override {
+        ssize_t sent = ::send(sockfd_, data, length, 0);
+
+        if (sent < 0) {
+            return mapSendErrno(errno);
+        }
+    
+        if (sent != static_cast<ssize_t>(length)) {
+            return std::unexpected(ErrorCode::PartialSend);
+        }
+    
+        return {}; // success
+    }
+
+    std::expected<ReceivedPacket, ErrorCode> recvFrom() override {
+        static thread_local uint8_t buf[PACKET_BUFFER_SIZE];
         sockaddr_storage src{};
         socklen_t srclen = sizeof(src);
     
         ssize_t received = ::recvfrom(
             sockfd_,
             buf,
-            PACKET_BUFFER_SIZE,
+            sizeof(buf),
             0,
             reinterpret_cast<sockaddr*>(&src),
             &srclen
         );
     
         if (received < 0) {
-            if (errno == EWOULDBLOCK || errno == EAGAIN) {
-                return std::nullopt;
+            switch (errno) {
+                case EWOULDBLOCK:
+                case EAGAIN:
+                    return std::unexpected(ErrorCode::WouldBlock);
+    
+                case EBADF:
+                case ENOTSOCK:
+                    return std::unexpected(ErrorCode::InvalidSocket);
+    
+                default:
+                    return std::unexpected(ErrorCode::RecvFailed);
             }
-            throw std::runtime_error("recvfrom failed: " + std::string(strerror(errno)));
         }
     
-        UDPAddr addr = decodeAddr(reinterpret_cast<sockaddr*>(&src));
-        return std::make_tuple(reinterpret_cast<const uint8_t*>(buf), static_cast<size_t>(received), addr);
+        if (received == 0) {
+            return std::unexpected(ErrorCode::Closed); // rare, but possible
+        }
+    
+        auto addrResult = decodeAddr(reinterpret_cast<sockaddr*>(&src));
+        if (!addrResult) {
+            return std::unexpected(addrResult.error());
+        }
+
+        const auto& addr = *addrResult;
+        if (addr.port == 0) {
+            return std::unexpected(ErrorCode::InvalidAddress);
+        }
+
+        return ReceivedPacket{
+            .data = reinterpret_cast<const uint8_t*>(buf),
+            .length = static_cast<size_t>(received),
+            .addr = addr
+        };
     }    
 
-    int getHandle() const override {
+    std::expected<int, ErrorCode> getHandle() const override {
+        if (sockfd_ == -1) {
+            return std::unexpected(ErrorCode::InvalidSocket);
+        }
         return sockfd_;
-    }
+    }    
 
     void close() override {
         if (sockfd_ != -1) {
@@ -81,66 +136,75 @@ public:
 private:
     int sockfd_;
 
-    static UDPAddr decodeAddr(const sockaddr* addr) {
+    static std::expected<Addr, ErrorCode> decodeAddr(const sockaddr* addr) {
         char ip[INET6_ADDRSTRLEN];
         uint16_t port = 0;
-
+    
         if (addr->sa_family == AF_INET) {
             auto* a = reinterpret_cast<const sockaddr_in*>(addr);
-            inet_ntop(AF_INET, &a->sin_addr, ip, sizeof(ip));
+            if (!inet_ntop(AF_INET, &a->sin_addr, ip, sizeof(ip))) {
+                return std::unexpected(ErrorCode::InvalidAddress);
+            }
             port = ntohs(a->sin_port);
         } else if (addr->sa_family == AF_INET6) {
             auto* a = reinterpret_cast<const sockaddr_in6*>(addr);
-            inet_ntop(AF_INET6, &a->sin6_addr, ip, sizeof(ip));
+            if (!inet_ntop(AF_INET6, &a->sin6_addr, ip, sizeof(ip))) {
+                return std::unexpected(ErrorCode::InvalidAddress);
+            }
             port = ntohs(a->sin6_port);
         } else {
-            throw std::runtime_error("Unsupported address family");
+            return std::unexpected(ErrorCode::UnsupportedAddressFamily);
         }
-
-        return UDPAddr(ip, port);
+    
+        return Addr{ip, port};
     }
+    
 };
 
-std::unique_ptr<UDPSocket> ListenUDP(const UDPAddr& bindAddr) {
+std::expected<std::unique_ptr<Socket>, ErrorCode> Listen(const Addr& bindAddr) {
     int family = AF_INET;
     const void* addrPtr = nullptr;
 
     sockaddr_in addr4{};
+    sockaddr_in6 addr6{};
+
     if (inet_pton(AF_INET, bindAddr.ip.c_str(), &addr4.sin_addr) == 1) {
         family = AF_INET;
         addr4.sin_family = AF_INET;
         addr4.sin_port = htons(bindAddr.port);
         addrPtr = &addr4;
-    } else {
-        sockaddr_in6 addr6{};
-        if (inet_pton(AF_INET6, bindAddr.ip.c_str(), &addr6.sin6_addr) != 1) {
-            throw std::runtime_error("Invalid IP address: " + bindAddr.ip);
-        }
+    } else if (inet_pton(AF_INET6, bindAddr.ip.c_str(), &addr6.sin6_addr) == 1) {
         family = AF_INET6;
         addr6.sin6_family = AF_INET6;
         addr6.sin6_port = htons(bindAddr.port);
         addrPtr = &addr6;
+    } else {
+        return std::unexpected(ErrorCode::InvalidAddress);
     }
 
-    int sockfd = socket(family, SOCK_DGRAM, 0);
+    int sockfd = ::socket(family, SOCK_DGRAM, 0);
     if (sockfd < 0) {
-        throw std::runtime_error("socket() failed: " + std::string(strerror(errno)));
+        return std::unexpected(ErrorCode::SocketCreateFailed);
     }
 
     // Make socket non-blocking
     int flags = fcntl(sockfd, F_GETFL, 0);
-    fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
-
-    // Bind
-    if (bind(sockfd, reinterpret_cast<const sockaddr*>(addrPtr), (family == AF_INET) ? sizeof(sockaddr_in) : sizeof(sockaddr_in6)) < 0) {
-        close(sockfd);
-        throw std::runtime_error("bind() failed: " + std::string(strerror(errno)));
+    if (flags < 0 || fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        ::close(sockfd);
+        return std::unexpected(ErrorCode::SocketConfigFailed);
     }
 
-    return std::make_unique<UDPSocketUnix>(sockfd);
+    // Bind
+    socklen_t socklen = (family == AF_INET) ? sizeof(sockaddr_in) : sizeof(sockaddr_in6);
+    if (::bind(sockfd, reinterpret_cast<const sockaddr*>(addrPtr), socklen) < 0) {
+        ::close(sockfd);
+        return std::unexpected(ErrorCode::BindFailed);
+    }
+
+    return std::make_unique<SocketUnix>(sockfd);
 }
 
-std::unique_ptr<UDPSocket> DialUDP(const UDPAddr& remoteAddr) {
+std::expected<std::unique_ptr<Socket>, ErrorCode> Dial(const Addr& remoteAddr) {
     int family = AF_INET;
     sockaddr_storage remoteSock{};
     socklen_t remoteLen = 0;
@@ -158,24 +222,27 @@ std::unique_ptr<UDPSocket> DialUDP(const UDPAddr& remoteAddr) {
         addr6->sin6_port = htons(remoteAddr.port);
         remoteLen = sizeof(sockaddr_in6);
     } else {
-        throw std::runtime_error("Invalid IP address: " + remoteAddr.ip);
+        return std::unexpected(ErrorCode::InvalidAddress);
     }
 
     int sockfd = socket(family, SOCK_DGRAM, 0);
     if (sockfd < 0) {
-        throw std::runtime_error("socket() failed: " + std::string(strerror(errno)));
+        return std::unexpected(ErrorCode::SocketCreateFailed);
     }
 
-    // Non-blocking
+    // Make socket non-blocking
     int flags = fcntl(sockfd, F_GETFL, 0);
-    fcntl(sockfd, F_SETFL, flags | O_NONBLOCK);
+    if (flags < 0 || fcntl(sockfd, F_SETFL, flags | O_NONBLOCK) < 0) {
+        ::close(sockfd);
+        return std::unexpected(ErrorCode::SocketConfigFailed);
+    }
 
     if (connect(sockfd, reinterpret_cast<sockaddr*>(&remoteSock), remoteLen) < 0) {
         ::close(sockfd);
-        throw std::runtime_error("connect() failed: " + std::string(strerror(errno)));
+        return std::unexpected(ErrorCode::ConnectFailed);
     }
 
-    return std::make_unique<UDPSocketUnix>(sockfd);
+    return std::make_unique<SocketUnix>(sockfd);
 }
 
-} // namespace pulse::net
+} // namespace pulse::net::udp
