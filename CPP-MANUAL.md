@@ -138,28 +138,26 @@ The only permitted exception usage is:
 *   In constructors that validate input (e.g. parsing a malformed IP in `Addr("abc", 1234)`). These exceptions **MUST** be caught within the factory function (see L.3, API.2) and translated into an `std::expected` error before leaving the creating API boundary.
 *   In third-party libraries (which we keep isolated and wrap cleanly, ensuring their exceptions are caught and translated to `std::expected` or handled internally).
 
-All runtime code SHALL use `std::expected` for error propagation.
+All runtime code SHALL use `std::expected` for error propagation. See API.3 for more information.
 
 ```cpp
 // Example of catching an internal exception in a factory
 // static
-std::expected<std::unique_ptr<MyObject>, ErrorCode> MyObject::Create(const std::string& config_data) {
+std::expected<std::unique_ptr<MyObject>, Error> MyObject::Create(const std::string& config_data) {
     try {
         // MyObjectImpl constructor might throw on bad config_data
         auto impl = std::make_unique<MyObjectImpl>(config_data);
         return impl;
     } catch (const std::invalid_argument& e) {
-        // log_error("MyObject creation failed: {}", e.what());
-        return std::unexpected(ErrorCode::InvalidConfiguration);
+        return std::unexpected(Error(ErrorCode::InvalidConfiguration, e));
     } catch (...) {
-        // log_error("MyObject creation failed due to unknown exception");
-        return std::unexpected(ErrorCode::UnknownError);
+        return std::unexpected(Error(ErrorCode::UnknownError));
     }
 }
 
 // Usage
-std::expected<std::unique_ptr<MyObject>, ErrorCode> result = MyObject::Create("bad data");
-if (!result) return result.error(); // Propagate ErrorCode
+std::expected<std::unique_ptr<MyObject>, Error> result = MyObject::Create("bad data");
+if (!result) return result.error(); // Propagate Error
 ```
 
 Don’t like it? Go back to Java.
@@ -180,7 +178,7 @@ public:
     virtual ~MyObject() = default;
 
     // Factory function
-    static std::expected<std::unique_ptr<MyObject>, ErrorCode> Create(...);
+    static std::expected<std::unique_ptr<MyObject>, Error> Create(...);
 
 protected:
     MyObject() = default; // Or make constructors private/protected if MyObjectImpl is a friend/nested
@@ -202,8 +200,8 @@ If you expose a public constructor, it SHALL be for pure POD/struct-only utility
 No raw `new`. No manual `delete`. No shared ownership by default.
 
 If you pass ownership: use `std::unique_ptr<T>`.
-If you return a result that might fail (including object creation): use `std::expected<T, ErrorCode>`.
-If you create an object that might fail: use `std::expected<std::unique_ptr<T>, ErrorCode>`.
+If you return a result that might fail (including object creation): use `std::expected<T, Error>`.
+If you create an object that might fail: use `std::expected<std::unique_ptr<T>, Error>`.
 
 If you're writing `T* foo = new T(...)` and returning it or storing it in a raw pointer member, you're doing it wrong.
 
@@ -238,7 +236,7 @@ These layers establish strict boundaries crucial for maintainability, testabilit
 
 1.  **`[ Interface Layer ]`**
     *   **Location:** `include/oat/yourlib/...` (or similar public include path)
-    *   **Content:** Public headers defining abstract classes (interfaces), POD-like configuration structs, public enums (like `ErrorCode`), and factory function declarations (e.g., `static std::expected<std::unique_ptr<InterfaceType>, ErrorCode> Create(...)`).
+    *   **Content:** Public headers defining abstract classes (interfaces), POD-like configuration structs, public enums (like `ErrorCode`), and factory function declarations (e.g., `static std::expected<std::unique_ptr<InterfaceType>, Error> Create(...)`).
     *   **Rule:** Interfaces expose **nothing private**. No implementation details, no private helper classes, no internal data structures. They define the "what," not the "how."
 
 2.  **`[ Implementation Layer ]`**
@@ -268,7 +266,7 @@ These layers establish strict boundaries crucial for maintainability, testabilit
             virtual ~Protocol() = default; // Always provide a virtual destructor for interfaces
 
             virtual void tick(uint64_t now_ns) = 0;
-            virtual std::expected<void, ErrorCode> sendMessage(BufferView payload) = 0;
+            virtual std::expected<void, Error> sendMessage(BufferView payload) = 0;
             // ... other interface methods
         };
     } // namespace oat::service
@@ -289,7 +287,7 @@ These layers establish strict boundaries crucial for maintainability, testabilit
     ```cpp
     // In configuration struct or factory function parameters:
     using OnMessageReceived = std::function<void(BufferView message)>;
-    using OnDisconnected = std::function<void(ErrorCode reason)>;
+    using OnDisconnected = std::function<void(Error reason)>;
 
     struct ProtocolConfig {
         // ... other config ...
@@ -297,7 +295,7 @@ These layers establish strict boundaries crucial for maintainability, testabilit
         OnDisconnected on_disconnected_cb;
     };
 
-    // static std::expected<std::unique_ptr<Protocol>, ErrorCode>
+    // static std::expected<std::unique_ptr<Protocol>, Error>
     // CreateProtocol(Socket& transport, const ProtocolConfig& config);
     ```
 
@@ -499,7 +497,7 @@ Consistent naming is crucial for code comprehension.
     ```cpp
     class DataProcessor {
     public:
-        static std::expected<std::unique_ptr<DataProcessor>, ErrorCode> Create(Config& cfg);
+        static std::expected<std::unique_ptr<DataProcessor>, Error> Create(Config& cfg);
 
         void submitData(BufferView data);
         bool isProcessing() const;
@@ -583,7 +581,7 @@ Strive to minimize the `#include` directives in your header files.
     // my_service.h
     #pragma once
     #include <memory> // For std::unique_ptr
-    #include <oat/core/error_code.h> // For ErrorCode
+    #include <oat/core/error_code.h> // For ErrorCode, Error (Tagged Enum Wrapper)
     #include <oat/core/buffer_view.h> // For BufferView
 
     // Forward declarations
@@ -621,7 +619,7 @@ APIs should expose narrow, well-defined entry points. Functions or methods with 
     🚫 Wrong (Too many parameters):
     ```cpp
     // class NetworkStack;
-    // static std::expected<std::unique_ptr<NetworkStack>, ErrorCode>
+    // static std::expected<std::unique_ptr<NetworkStack>, Error>
     // CreateNetworkStack(
     //     const std::string& bind_ip,
     //     uint16_t bind_port,
@@ -650,7 +648,7 @@ APIs should expose narrow, well-defined entry points. Functions or methods with 
 
     // In network_stack.h
     // class NetworkStack;
-    // static std::expected<std::unique_ptr<NetworkStack>, ErrorCode>
+    // static std::expected<std::unique_ptr<NetworkStack>, Error>
     // CreateNetworkStack(const NetworkStackConfig& config);
     ```
 
@@ -659,7 +657,7 @@ APIs should expose narrow, well-defined entry points. Functions or methods with 
 
 ---
 
-### API.2: **Construction Contract: `std::expected<std::unique_ptr<T>, ErrorCode>` for Object Creation.**
+### API.2: **Construction Contract: `std::expected<std::unique_ptr<T>, Error>` for Object Creation.**
 
 This is the **non-negotiable construction contract** for any stateful object provided by an Oat Interactive library that can fail during creation.
 
@@ -667,7 +665,7 @@ This is the **non-negotiable construction contract** for any stateful object pro
 // Example: public_interface.h
 #include <memory>       // For std::unique_ptr
 #include <expected>     // For std::expected
-#include "error_code.h" // Your library's ErrorCode enum
+#include <oat/lib/error_code.h> // ErrorCode + Error Wrapper.
 
 class PublicInterface {
 public:
@@ -676,7 +674,7 @@ public:
     // ... other pure virtual methods ...
 
     // The Factory Function - This is the ONLY way to get an instance
-    static std::expected<std::unique_ptr<PublicInterface>, ErrorCode> Create(
+    static std::expected<std::unique_ptr<PublicInterface>, Error> Create(
         const SomeConfig& config
         /*, other dependencies like Logger*, Metrics* */
     );
@@ -693,7 +691,7 @@ protected:
 ```
 
 *   **Ownership:** The caller receives unique ownership via `std::unique_ptr<PublicInterface>`.
-*   **Error Handling:** Creation failure is explicitly handled via `std::expected<..., ErrorCode>`. No exceptions propagate from `Create()`.
+*   **Error Handling:** Creation failure is explicitly handled via `std::expected<..., Error>`. No exceptions propagate from `Create()`.
 *   **Abstraction:** The caller does not know (and does not care) about the concrete implementation type (e.g., `PublicInterfaceImpl`). They only interact with `PublicInterface`.
 *   **No `new` by Caller:** If consumers of your library have to write `new MyLibObject(...)`, your abstraction is broken. The `Create` factory encapsulates object instantiation and any potential setup that might fail.
 
@@ -704,70 +702,139 @@ This pattern enforces:
 
 ---
 
-### API.3: **Error Handling: `enum class ErrorCode` Exclusively for API Errors.**
+### API.3: **Error Handling: Use a Tagged `Error` Wrapper with `ErrorCode`**
 
-All errors returned from public API functions (including factory functions) SHALL be represented by a well-defined `enum class ErrorCode`.
+All public API functions that may fail SHALL return a `std::expected<T, Error>` where `Error` wraps a strongly-typed `enum class ErrorCode`. No function that can fail shall return `bool`, `nullptr`, magic integers, or `std::optional` as an error signal. This is a modern C++ codebase, not a 2002 Arduino project.
 
-1.  **Define Error Codes Centrally (Per Library/Module):**
-    Each library or major component should define its specific error codes.
+---
 
-    ```cpp
-    // include/oat/your_library/error_code.h
-    #pragma once
+#### 1. Define `ErrorCode` Centrally Per Module
 
-    namespace oat::your_library {
-        enum class ErrorCode {
-            Ok = 0, // Conventionally, 0 means success if an error code is also used for success states
+Each module or library SHALL define its own scoped `enum class ErrorCode`. It SHALL NOT leak into unrelated domains.
 
-            // General Errors
-            UnknownError,
-            NotInitialized,
-            AlreadyInitialized,
-            InvalidArgument,
-            Timeout,
+```cpp
+// include/oat/foo/error_code.h
+#pragma once
 
-            // Module-Specific Errors
-            ConnectionFailed,
-            Disconnected,
-            PacketTooLarge,
-            InvalidChannel,
-            ResourceUnavailable,
-            AccessDenied,
-            // ... add more specific errors as needed
-        };
+namespace oat::foo {
 
-        // Optional: A helper to get string representations for logging/debugging
-        // const char* to_string(ErrorCode ec);
+enum class ErrorCode {
+    Ok = 0,
 
-    } // namespace oat::your_library
-    ```
+    // General
+    Unknown,
+    InvalidArgument,
+    NotInitialized,
+    AlreadyInitialized,
+    Timeout,
 
-2.  **No Magic Numbers or Strings for Errors:**
-    Error conditions are part of your API contract. Using raw integers or strings for errors is brittle, hard to manage, and not type-safe. `enum class` provides type safety and clarity.
+    // Module-specific
+    ConnectionFailed,
+    Disconnected,
+    PacketTooLarge,
+    InvalidChannel,
+    ResourceUnavailable,
+    InvalidAddress,
+    // Extend as needed
+};
 
-3.  **Expand Carefully:**
-    Add new error codes thoughtfully. Ensure they represent distinct, actionable failure modes. Include a catch-all like `UnknownError` for unexpected internal states that map to a failure.
+} // namespace oat::foo
+```
 
-4.  **`std::expected<void, ErrorCode>` for Operations:**
-    For operations that can fail but don't return a value on success, use `std::expected<void, ErrorCode>`.
+---
 
-    ```cpp
-    // class MyService {
-    // public:
-    //     virtual std::expected<void, ErrorCode> start();
-    //     virtual std::expected<void, ErrorCode> stop();
-    //     virtual std::expected<Data, ErrorCode> fetchData(RequestId id);
-    // };
-    ```
-    Checking the result:
-    ```cpp
-    // if (auto result = my_service->start(); !result) {
-    //     logger->log(Level::Error, "Failed to start service: {}", to_string(result.error()));
-    //     return result.error();
-    // }
-    ```
+#### 2. Use a Tagged `Error` Wrapper
 
-This isn't JavaScript. Errors are explicit, typed, and part of the documented API.
+All API-visible errors SHALL be wrapped in a concrete `Error` type that includes both the `ErrorCode` and optional diagnostic string.
+
+```cpp
+#pragma once
+#include <string>
+#include <stdexcept>
+#include "error_code.h" // Your module-specific enum
+
+namespace oat::foo {
+
+class Error {
+public:
+    ErrorCode code;
+    std::string message;
+
+    Error(ErrorCode c) : code(c) {}
+    Error(ErrorCode c, const std::exception& e) : code(c), message(e.what()) {}
+    Error(ErrorCode c, std::string msg) : code(c), message(std::move(msg)) {}
+
+    std::string_view what() const noexcept { return message; }
+    ErrorCode code_value() const noexcept { return code; }
+
+    // Critical: must support direct comparison
+    bool operator==(ErrorCode other) const noexcept { return code == other; }
+    bool operator!=(ErrorCode other) const noexcept { return code != other; }
+};
+
+} // namespace oat::foo
+```
+
+---
+
+#### 3. Don't Throw. Return `std::expected`.
+
+All recoverable errors SHALL be returned via `std::expected<T, Error>`. No `throw`. No `try/catch`. No runtime RTTI traps. This isn't Python.
+
+```cpp
+std::expected<Widget, Error> CreateWidget(std::string_view name);
+
+std::expected<void, Error> SendMessage(const Widget& w, std::string_view msg);
+```
+
+For errorful construction:
+
+```cpp
+std::expected<Addr, Error> CreateAddr(const std::string& ip, uint16_t port) {
+    try {
+        return Addr(ip, port);
+    } catch (const std::invalid_argument& e) {
+        return std::unexpected(Error(ErrorCode::InvalidAddress, e));
+    }
+}
+```
+
+---
+
+#### 4. Void Results Use `std::expected<void, Error>`
+
+If the success path has no data payload, use `expected<void, Error>`. Don't fall back to `bool`. You're not writing firmware.
+
+```cpp
+std::expected<void, Error> Connect();
+std::expected<void, Error> Shutdown();
+```
+
+---
+
+#### 5. Never Compare `ErrorCode` with Magic Numbers
+
+Always use the defined `enum class ErrorCode`. Never compare to raw integers. Never log `error code = 3`. Your compiler is there to help. Use it.
+
+```cpp
+if (auto res = Shutdown(); !res) {
+    if (res.error() == ErrorCode::NotInitialized) {
+        logger->warn("Shutdown() skipped: not initialized.");
+    } else {
+        logger->error("Shutdown() failed: {}", res.error().what());
+    }
+}
+```
+
+---
+
+#### 6. No `std::error_code`. No `std::system_error`.
+
+These are fossilized. They drag libc errno mappings into every layer and are tightly bound to exceptions and OS-level faults. We’re building systems, not writing libc adapters. Don’t use them.
+
+---
+
+This is not JavaScript. Errors are explicit, typed, and part of your API. They are not side effects, control flow, or stream-of-consciousness logging. They are contracts.
 
 ---
 
@@ -923,8 +990,8 @@ Internal data structures, especially buffers or collections, must be protected f
     If a component generates data that the caller should own and manage, return it by `std::unique_ptr` (if heap-allocated) or by value (if small and copyable), often wrapped in `std::expected`.
 
     ```cpp
-    // std::expected<std::unique_ptr<DataObject>, ErrorCode> createDataObject();
-    // std::expected<CopiedResult, ErrorCode> processAndReturnCopy();
+    // std::expected<std::unique_ptr<DataObject>, Error> createDataObject();
+    // std::expected<CopiedResult, Error> processAndReturnCopy();
     ```
 
 **Your component owns its internal state. External interaction happens through controlled interfaces.**
@@ -936,7 +1003,7 @@ Internal data structures, especially buffers or collections, must be protected f
 The lifetime of objects created by your library must be clear and managed correctly, primarily through the `std::unique_ptr` returned by factory functions.
 
 1.  **Safe to Destroy Anytime (Post-Creation):**
-    Objects returned via `std::expected<std::unique_ptr<T>, ErrorCode>` by a factory function (`CreateX()`) MUST be safe for the caller to destroy (by letting the `std::unique_ptr` go out of scope) at any point after successful creation, without requiring additional cleanup calls on other objects *unless explicitly documented as a coupled lifetime*.
+    Objects returned via `std::expected<std::unique_ptr<T>, Error>` by a factory function (`CreateX()`) MUST be safe for the caller to destroy (by letting the `std::unique_ptr` go out of scope) at any point after successful creation, without requiring additional cleanup calls on other objects *unless explicitly documented as a coupled lifetime*.
     *   Avoid designs where destroying object A in isolation causes crashes because object B (not owned by A's `unique_ptr`) still holds a raw pointer to A's internals without a proper observer/subscriber removal mechanism.
 
 2.  **No `.init()` Calls After Construction via Factory:**
@@ -962,7 +1029,7 @@ Exposing Standard Library (STL) types directly in the Application Binary Interfa
     *   **`std::string_view` lifetime:** Be extremely careful. A `std::string_view` is only valid as long as the underlying buffer it points to is valid. Returning a `std::string_view` that points to a temporary `std::string`'s internal buffer is a dangling pointer waiting to happen.
 
 3.  **Full Ownership Transfer for Complex Types:**
-    If an API needs to return a complex STL object (like `std::vector`) and the caller owns it, often the safest (though potentially less performant) way across a hard ABI boundary is to return it by value (if it's movable and the move is efficient) or serialize it to a C-style buffer. For internal Oat Interactive libraries built together, `std::expected<std::vector<MyPOD>, ErrorCode>` can be fine.
+    If an API needs to return a complex STL object (like `std::vector`) and the caller owns it, often the safest (though potentially less performant) way across a hard ABI boundary is to return it by value (if it's movable and the move is efficient) or serialize it to a C-style buffer. For internal Oat Interactive libraries built together, `std::expected<std::vector<MyPOD>, Error>` can be fine.
 
 **Rule of Thumb for Shared Libraries:** The "C" subset of C++ is the most stable ABI. If you expose complex C++ types, you are implicitly tying yourself to a specific compiler toolchain and settings for ABI compatibility. For Oat Interactive internal modules built together, this is less of a concern than for libraries distributed to third parties.
 
@@ -1427,7 +1494,7 @@ Testing only the "happy path" (where everything works perfectly) is insufficient
 Your tests MUST cover:
 
 *   **Invalid Inputs:** Null pointers, empty buffers, out-of-range values, malformed data.
-*   **Error Conditions:** How does the system behave when an operation fails? Are correct `ErrorCode`s returned?
+*   **Error Conditions:** How does the system behave when an operation fails? Are correct `Error`s returned?
 *   **Resource Exhaustion (Simulated):** How does the system react if it can't allocate memory (if testable), or if a dependent service reports an error?
 *   **Timeouts:** For time-sensitive operations, do timeouts work correctly?
 *   **Network Issues (for network code):**
@@ -1908,9 +1975,9 @@ These design patterns or practices are considered fundamentally misaligned with 
     *   **Problem:** C-style error handling with output parameters is error-prone (caller might forget to check the return code), makes function signatures clunky, and doesn't compose well.
         ```cpp
         // 🚫 DOA Example:
-        // bool get_data(int id, MyData* out_data, ErrorCode* out_error);
+        // bool get_data(int id, MyData* out_data, Error* out_error);
         ```
-    *   **Oat Interactive Way:** Use `std::expected<T, ErrorCode>` to return either a value `T` or an `ErrorCode`. This forces the caller to explicitly check for and handle the error case. (See L.2, L.4, API.2, API.3).
+    *   **Oat Interactive Way:** Use `std::expected<T, Error>` to return either a value `T` or an `Error`. This forces the caller to explicitly check for and handle the error case. (See L.2, L.4, API.2, API.3).
 
 ---
 
