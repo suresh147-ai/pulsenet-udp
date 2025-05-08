@@ -21,4 +21,19 @@ private:
     alignas(16) char storage_[128]{}; // big enough for sockaddr_in6
 };
 
+inline bool operator==(const Addr& lhs, const Addr& rhs) {
+    return lhs.ip == rhs.ip && lhs.port == rhs.port;
+}
+
 } // namespace pulse::net::udp
+
+namespace std {
+    template <>
+    struct hash<pulse::net::udp::Addr> {
+        size_t operator()(const pulse::net::udp::Addr& a) const noexcept {
+            size_t h1 = std::hash<std::string>{}(a.ip);
+            size_t h2 = std::hash<uint16_t>{}(a.port);
+            return h1 ^ (h2 << 1);
+        }
+    };
+}
